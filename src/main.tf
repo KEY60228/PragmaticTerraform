@@ -1,15 +1,32 @@
-module "describe_regions_for_ec2" {
-    source = "./iam_role"
-    name = "describe-regions-for-ec2"
-    policy = data.aws_iam_policy_document.allow_describe_regions.json
-    identifier = "ec2.amazonaws.com"
-}
-
 module "example_sg" {
     source = "./security_group"
     name = "module-sg"
     vpc_id = aws_vpc.example.id
     port = 80
+    cidr_blocks = ["0.0.0.0/0"]
+}
+
+module "http_sg" {
+    source = "./security_group"
+    name = "http-sg"
+    vpc_id = aws_vpc.example.id
+    port = 80
+    cidr_blocks = ["0.0.0.0/0"]
+}
+
+module "https_sg" {
+    source = "./security_group"
+    name = "https-sg"
+    vpc_id = aws_vpc.example.id
+    port = 443
+    cidr_blocks = ["0.0.0.0/0"]
+}
+
+module "http_redirect_sg" {
+    source = "./security_group"
+    name = "http-redirect-sg"
+    vpc_id = aws_vpc.example.id
+    port = 8080
     cidr_blocks = ["0.0.0.0/0"]
 }
 
@@ -38,7 +55,7 @@ resource "aws_s3_bucket_public_access_block" "private" {
 }
 
 resource "aws_s3_bucket" "public" {
-    bucket = "public_pragmatic_terraform-20210327"
+    bucket = "public-pragmatic-terraform-20210327"
     acl = "public-read"
 
     cors_rule {
@@ -191,4 +208,48 @@ resource "aws_route" "private_1c" {
     route_table_id = aws_route_table.private_1c.id
     nat_gateway_id = aws_nat_gateway.nat_gateway_1c.id
     destination_cidr_block = "0.0.0.0/0"
+}
+
+resource "aws_lb" "example" {
+    name = "example"
+    load_balancer_type = "application"
+    internal = false
+    idle_timeout = 60
+    enable_deletion_protection = true
+
+    subnets = [
+        aws_subnet.public_1a.id,
+        aws_subnet.public_1c.id,
+    ]
+
+    access_logs {
+        bucket = aws_s3_bucket.alb_log.id
+        enabled = true
+    }
+
+    security_groups = [
+        module.http_sg.security_group_id,
+        module.https_sg.security_group_id,
+        module.http_redirect_sg.security_group_id,
+    ]
+}
+
+output "alb_dns_name" {
+    value = aws_lb.example.dns_name
+}
+
+resource "aws_lb_listener" "http" {
+    load_balancer_arn = aws_lb.example.arn
+    port = "80"
+    protocol = "HTTP"
+
+    default_action {
+        type = "fixed-response"
+
+        fixed_response {
+            content_type = "text/plain"
+            message_body = "これは'HTTP'です"
+            status_code = "200"
+        }
+    }
 }
