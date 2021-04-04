@@ -6,6 +6,14 @@ module "example_sg" {
     cidr_blocks = ["0.0.0.0/0"]
 }
 
+module "nginx_sg" {
+    source = "./security_group"
+    name = "nginx-sg"
+    vpc_id = aws_vpc.example.id
+    port = 80
+    cidr_blocks = [aws_vpc.example.cidr_block]
+}
+
 module "http_sg" {
     source = "./security_group"
     name = "http-sg"
@@ -30,20 +38,6 @@ module "http_redirect_sg" {
     cidr_blocks = ["0.0.0.0/0"]
 }
 
-module "ecs_task_execution_role" {
-    source = "./iam_role"
-    name = "ecs-rask-execution"
-    identifier = "ecs-tasks.amazonaws.com"
-    policy = data.aws_iam_policy_document.ecs_task_execution.json
-}
-
-module "ecs_events_role" {
-    source = "./iam_role"
-    name = "ecs-events"
-    identifier = "events.amazonaws.com"
-    policy = data.aws_iam_policy.ecs_events_role_policy.policy
-}
-
 module "mysql_sg" {
     source = "./security_group"
     name = "mysql-sg"
@@ -58,6 +52,20 @@ module "redis_sg" {
     vpc_id = aws_vpc.example.id
     port = 6379
     cidr_blocks = [aws_vpc.example.cidr_block]
+}
+
+module "ecs_task_execution_role" {
+    source = "./iam_role"
+    name = "ecs-rask-execution"
+    identifier = "ecs-tasks.amazonaws.com"
+    policy = data.aws_iam_policy_document.ecs_task_execution.json
+}
+
+module "ecs_events_role" {
+    source = "./iam_role"
+    name = "ecs-events"
+    identifier = "events.amazonaws.com"
+    policy = data.aws_iam_policy.ecs_events_role_policy.policy
 }
 
 module "codebuild_role" {
@@ -97,6 +105,148 @@ module "cloudwatch_logs_role" {
 
 data "aws_iam_policy" "ecs_events_role_policy" {
     arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceEventsRole"
+}
+
+data "aws_iam_policy_document" "alb_log" {
+    statement {
+        effect = "Allow"
+        actions = ["s3:PutObject"]
+        resources = [ "arn:aws:s3:::${aws_s3_bucket.alb_log.id}/*" ]
+
+        principals {
+            type = "AWS"
+            identifiers = [ "582318560864" ]
+        }
+    }
+}
+
+# data "aws_route53_zone" "example" {
+#     name = "example.com"
+#     zone_id = "example.com"
+# }
+
+data "aws_iam_policy" "ecs_task_execution_role_policy" {
+    arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionPolicy"
+}
+
+data "aws_iam_policy_document" "ecs_task_execution" {
+    source_json = data.aws_iam_policy.ecs_task_execution_role_policy.policy
+
+    statement {
+        effect = "Allow"
+        actions = ["ssm:GetParameters", "kms:Decrypt"]
+        resources = [ "*" ]
+    }
+}
+
+data "aws_iam_policy_document" "codebuild" {
+    statement {
+        effect = "Allow"
+        resources = ["*"]
+
+        actions = [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "logs:CreateLogGroup",
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+            "ecr:GetAuthorizationToken",
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:GetRepositoryPolicy",
+            "ecr:DescribeImages",
+            "ecr:BatchGetImage",
+            "ecr:InitiateLayeUpload",
+            "ecr:UploadLayerPart",
+            "ecr:CompleteLayerUpload",
+            "ecr:PutImage",
+        ]
+    }
+}
+
+data "aws_iam_policy_document" "codepipeline" {
+    statement {
+        effect = "Allow"
+        resources = ["*"]
+
+        actions = [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "s3:GetBucketVersioning",
+            "codebuild:BatchGetBuilds",
+            "codebuild:StartBuild",
+            "ecs:DescribeServices",
+            "ecs:DescribeTaskDefinition",
+            "ecs:DescribeTasks",
+            "ecs:ListTasks",
+            "ecs:RegisterTaskDefinition",
+            "ecs:UpdateService",
+            "iam:PassRole",
+        ]
+    }
+}
+
+data "aws_iam_policy_document" "ec2_for_ssm" {
+    source_json = data.aws_iam_policy.ec2_for_ssm.policy
+
+    statement {
+        effect = "Allow"
+        resources = ["*"]
+
+        actions = [
+            "s3:PutObject",
+            "logs:PutLogEvents",
+            "logs:CreateLogStream",
+            "ecr:GetAuthorizationToken",
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "ssm:GetParameter",
+            "ssm:GetParameters",
+            "ssm:GetParametersByPath",
+            "kms:Decrypt",
+        ]
+    }
+}
+
+data "aws_iam_policy" "ec2_for_ssm" {
+    arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+data "aws_iam_policy_document" "kinesis_data_firehose" {
+    statement {
+        effect = "Allow"
+
+        actions = [
+            "s3:AbortMultipartUpload",
+            "s3:GetBucketLocation",
+            "s3:GetObject",
+            "s3:ListBucket",
+            "s3:ListBucketMultipartUploads",
+            "s3:PutObject",
+        ]
+
+        resources = [
+            "arn:aws:s3:::${aws_s3_bucket.cloudwatch_logs.id}",
+            "arn:aws:s3:::${aws_s3_bucket.cloudwatch_logs.id}/*",
+        ]
+    }
+}
+
+data "aws_iam_policy_document" "cloudwatch_logs" {
+    statement {
+        effect = "Allow"
+        actions = ["firehose:*"]
+        resources = ["arn:aws:firehose:ap-northeast-1:*:*"]
+    }
+
+    statement {
+        effect = "Allow"
+        actions = ["iam:PassRole"]
+        resources = ["arn:aws:iam::*:role/cloudwatch-logs"]
+    }
 }
 
 resource "aws_s3_bucket" "private" {
@@ -150,19 +300,6 @@ resource "aws_s3_bucket" "alb_log" {
 resource "aws_s3_bucket_policy" "alb_log" {
     bucket = aws_s3_bucket.alb_log.id
     policy = data.aws_iam_policy_document.alb_log.json
-}
-
-data "aws_iam_policy_document" "alb_log" {
-    statement {
-        effect = "Allow"
-        actions = ["s3:PutObject"]
-        resources = [ "arn:aws:s3:::${aws_s3_bucket.alb_log.id}/*" ]
-
-        principals {
-            type = "AWS"
-            identifiers = [ "582318560864" ]
-        }
-    }
 }
 
 resource "aws_vpc" "example" {
@@ -303,10 +440,6 @@ resource "aws_lb" "example" {
     ]
 }
 
-output "alb_dns_name" {
-    value = aws_lb.example.dns_name
-}
-
 resource "aws_lb_listener" "http" {
     load_balancer_arn = aws_lb.example.arn
     port = "80"
@@ -323,11 +456,6 @@ resource "aws_lb_listener" "http" {
     }
 }
 
-# data "aws_route53_zone" "example" {
-#     name = "example.com"
-#     zone_id = "example.com"
-# }
-
 # resource "aws_route53_record" "example" {
 #     zone_id = data.aws_route53_zone.example.zone_id
 #     name = data.aws_route53_zone.example.name
@@ -338,10 +466,6 @@ resource "aws_lb_listener" "http" {
 #         zone_id = aws_lb.example.zone_id
 #         evaluate_target_health = true
 #     }
-# }
-
-# output "domain_name" {
-#     value = aws_route53_record.example.name
 # }
 
 # resource "aws_acm_certificate" "example" {
@@ -483,31 +607,9 @@ resource "aws_ecs_service" "example" {
     }
 }
 
-module "nginx_sg" {
-    source = "./security_group"
-    name = "nginx-sg"
-    vpc_id = aws_vpc.example.id
-    port = 80
-    cidr_blocks = [aws_vpc.example.cidr_block]
-}
-
 resource "aws_cloudwatch_log_group" "for_ecs" {
     name = "/ecs/example"
     retention_in_days = 180
-}
-
-data "aws_iam_policy" "ecs_task_execution_role_policy" {
-    arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionPolicy"
-}
-
-data "aws_iam_policy_document" "ecs_task_execution" {
-    source_json = data.aws_iam_policy.ecs_task_execution_role_policy.policy
-
-    statement {
-        effect = "Allow"
-        actions = ["ssm:GetParameters", "kms:Decrypt"]
-        resources = [ "*" ]
-    }
 }
 
 resource "aws_cloudwatch_log_group" "for_ecs_scheduled_tasks" {
@@ -698,32 +800,6 @@ resource "aws_ecr_lifecycle_policy" "example" {
     EOF
 }
 
-data "aws_iam_policy_document" "codebuild" {
-    statement {
-        effect = "Allow"
-        resources = ["*"]
-
-        actions = [
-            "s3:PutObject",
-            "s3:GetObject",
-            "s3:GetObjectVersion",
-            "logs:CreateLogGroup",
-            "logs:CreateLogStream",
-            "logs:PutLogEvents",
-            "ecr:GetAuthorizationToken",
-            "ecr:BatchCheckLayerAvailability",
-            "ecr:GetDownloadUrlForLayer",
-            "ecr:GetRepositoryPolicy",
-            "ecr:DescribeImages",
-            "ecr:BatchGetImage",
-            "ecr:InitiateLayeUpload",
-            "ecr:UploadLayerPart",
-            "ecr:CompleteLayerUpload",
-            "ecr:PutImage",
-        ]
-    }
-}
-
 resource "aws_codebuild_project" "example" {
     name = "example"
     service_role = module.codebuild_role.iam_role_arn
@@ -741,29 +817,6 @@ resource "aws_codebuild_project" "example" {
         compute_type = "BUILD_GENERAL1_SMALL"
         image = "aws/codebuild/standard:2.0"
         privileged_mode = true
-    }
-}
-
-data "aws_iam_policy_document" "codepipeline" {
-    statement {
-        effect = "Allow"
-        resources = ["*"]
-
-        actions = [
-            "s3:PutObject",
-            "s3:GetObject",
-            "s3:GetObjectVersion",
-            "s3:GetBucketVersioning",
-            "codebuild:BatchGetBuilds",
-            "codebuild:StartBuild",
-            "ecs:DescribeServices",
-            "ecs:DescribeTaskDefinition",
-            "ecs:DescribeTasks",
-            "ecs:ListTasks",
-            "ecs:RegisterTaskDefinition",
-            "ecs:UpdateService",
-            "iam:PassRole",
-        ]
     }
 }
 
@@ -862,10 +915,6 @@ resource "aws_codepipeline_webhook" "example" {
     }
 }
 
-provider "github" {
-    organization = "my-github-name"
-}
-
 resource "github_repository_webhook" "example" {
     repository = "my-repository"
 
@@ -879,33 +928,6 @@ resource "github_repository_webhook" "example" {
     events = ["push"]
 }
 
-data "aws_iam_policy_document" "ec2_for_ssm" {
-    source_json = data.aws_iam_policy.ec2_for_ssm.policy
-
-    statement {
-        effect = "Allow"
-        resources = ["*"]
-
-        actions = [
-            "s3:PutObject",
-            "logs:PutLogEvents",
-            "logs:CreateLogStream",
-            "ecr:GetAuthorizationToken",
-            "ecr:BatchCheckLayerAvailability",
-            "ecr:GetDownloadUrlForLayer",
-            "ecr:BatchGetImage",
-            "ssm:GetParameter",
-            "ssm:GetParameters",
-            "ssm:GetParametersByPath",
-            "kms:Decrypt",
-        ]
-    }
-}
-
-data "aws_iam_policy" "ec2_for_ssm" {
-    arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
 resource "aws_iam_instance_profile" "ec2_for_ssm" {
     name = "ec2-for-ssm"
     role = module.ec2_for_ssm_role.iam_role_name
@@ -917,10 +939,6 @@ resource "aws_instance" "example_for_operation" {
     iam_instance_profile = aws_iam_instance_profile.ec2_for_ssm.name
     subnet_id = aws_subnet.private_1a.id
     user_data = file("./user_data.sh")
-}
-
-output "operation_instance_id" {
-    value = aws_instance.example_for_operation.id
 }
 
 resource "aws_s3_bucket" "operation" {
@@ -970,26 +988,6 @@ resource "aws_s3_bucket" "cloudwatch_logs" {
     }
 }
 
-data "aws_iam_policy_document" "kinesis_data_firehose" {
-    statement {
-        effect = "Allow"
-
-        actions = [
-            "s3:AbortMultipartUpload",
-            "s3:GetBucketLocation",
-            "s3:GetObject",
-            "s3:ListBucket",
-            "s3:ListBucketMultipartUploads",
-            "s3:PutObject",
-        ]
-
-        resources = [
-            "arn:aws:s3:::${aws_s3_bucket.cloudwatch_logs.id}",
-            "arn:aws:s3:::${aws_s3_bucket.cloudwatch_logs.id}/*",
-        ]
-    }
-}
-
 resource "aws_kinesis_firehose_delivery_stream" "example" {
     name = "example"
     destination = "s3"
@@ -999,20 +997,6 @@ resource "aws_kinesis_firehose_delivery_stream" "example" {
 
         bucket_arn = aws_s3_bucket.cloudwatch_logs.arn
         prefix = "ecs-scheduled-tasks/example/"
-    }
-}
-
-data "aws_iam_policy_document" "cloudwatch_logs" {
-    statement {
-        effect = "Allow"
-        actions = ["firehose:*"]
-        resources = ["arn:aws:firehose:ap-northeast-1:*:*"]
-    }
-
-    statement {
-        effect = "Allow"
-        actions = ["iam:PassRole"]
-        resources = ["arn:aws:iam::*:role/cloudwatch-logs"]
     }
 }
 
